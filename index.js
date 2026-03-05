@@ -93,46 +93,37 @@ async function getOutfits(userId) {
       }
     }
 
-    console.log(`[Fetch] userId ${userId}...`);
+    console.log('[Fetch] userId ' + userId + '...');
 
-    // Pagine toutes les pages (max 100 outfits)
-    let allOutfits = [];
-    let page = 1;
-    let hasMore = true;
+    // Page 1 : fetch immediat, retourne direct
+    const url1 = 'https://avatar.roblox.com/v1/users/' + userId + '/outfits?itemsPerPage=50&page=1';
+    const res1 = await fetchWithRetry(url1);
+    const data1 = await res1.json();
+    const page1 = (data1.data || []).filter(o => o.isEditable !== false);
+    console.log('[Fetch] Page 1: ' + page1.length + ' outfits (skin packs filtres)');
 
-    while (hasMore && allOutfits.length < 100) {
-      const url = `https://avatar.roblox.com/v1/users/${userId}/outfits?itemsPerPage=50&page=${page}`;
-      try {
-        // Page 1 : retry normal. Pages suivantes : 1 seul essai pour eviter 429
-        const response = page === 1
-          ? await fetchWithRetry(url)
-          : await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" } });
+    const hasPage2 = (data1.data || []).length === 50;
+    const merged = { data: page1, total: page1.length, hasMore: hasPage2 };
+    cache.set(userId, { data: merged, timestamp: Date.now() });
 
-        if (!response.ok) {
-          console.log(`[Fetch] Page ${page} failed (${response.status}), stopping pagination`);
-          break;
+    // Page 2 en background apres 30 secondes
+    if (hasPage2) {
+      setTimeout(async () => {
+        try {
+          console.log('[Fetch] Page 2 background for ' + userId);
+          const url2 = 'https://avatar.roblox.com/v1/users/' + userId + '/outfits?itemsPerPage=50&page=2';
+          const res2 = await fetchWithRetry(url2);
+          const data2 = await res2.json();
+          const page2 = (data2.data || []).filter(o => o.isEditable !== false);
+          const all = [...page1, ...page2];
+          cache.set(userId, { data: { data: all, total: all.length, hasMore: false }, timestamp: Date.now() });
+          console.log('[Cache] Page 2 done: ' + all.length + ' total for ' + userId);
+        } catch (e) {
+          console.log('[Fetch] Page 2 failed: ' + e.message);
         }
-
-        const data = await response.json();
-        if (data.data && data.data.length > 0) {
-          allOutfits = allOutfits.concat(data.data);
-          console.log(`[Fetch] Page ${page}: ${data.data.length} outfits (total: ${allOutfits.length})`);
-          hasMore = data.data.length === 50;
-          page++;
-          // Delai entre pages pour eviter 429
-          if (hasMore) await new Promise(r => setTimeout(r, 600));
-        } else {
-          hasMore = false;
-        }
-      } catch (e) {
-        console.log(`[Fetch] Page ${page} error: ${e.message}, stopping`);
-        break;
-      }
+      }, 30000);
     }
 
-    const merged = { data: allOutfits, total: allOutfits.length };
-    cache.set(userId, { data: merged, timestamp: Date.now() });
-    console.log(`[Cache] STORED ${allOutfits.length} total outfits for ${userId}`);
     return merged;
   });
 }
