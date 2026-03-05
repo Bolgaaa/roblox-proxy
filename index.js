@@ -43,7 +43,7 @@ function enqueue(fn) {
 // -----------------------------------------------
 // Fetch avec retry si 429
 // -----------------------------------------------
-async function fetchWithRetry(url, options = {}, maxRetries = 8) {
+async function fetchWithRetry(url, options = {}, maxRetries = 4) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const response = await fetch(url, {
       ...options,
@@ -57,7 +57,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 8) {
     if (response.ok) return response;
 
     if (response.status === 429 && attempt < maxRetries) {
-      const delay = attempt * 1500;
+      const delay = attempt * 800;
       console.log(`[Retry] 429 attempt ${attempt}/${maxRetries}, waiting ${delay}ms...`);
       await new Promise(r => setTimeout(r, delay));
       continue;
@@ -102,15 +102,31 @@ async function getOutfits(userId) {
 
     while (hasMore && allOutfits.length < 100) {
       const url = `https://avatar.roblox.com/v1/users/${userId}/outfits?itemsPerPage=50&page=${page}`;
-      const response = await fetchWithRetry(url);
-      const data = await response.json();
-      if (data.data && data.data.length > 0) {
-        allOutfits = allOutfits.concat(data.data);
-        console.log(`[Fetch] Page ${page}: ${data.data.length} outfits (total: ${allOutfits.length})`);
-        hasMore = data.data.length === 50;
-        page++;
-      } else {
-        hasMore = false;
+      try {
+        // Page 1 : retry normal. Pages suivantes : 1 seul essai pour eviter 429
+        const response = page === 1
+          ? await fetchWithRetry(url)
+          : await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" } });
+
+        if (!response.ok) {
+          console.log(`[Fetch] Page ${page} failed (${response.status}), stopping pagination`);
+          break;
+        }
+
+        const data = await response.json();
+        if (data.data && data.data.length > 0) {
+          allOutfits = allOutfits.concat(data.data);
+          console.log(`[Fetch] Page ${page}: ${data.data.length} outfits (total: ${allOutfits.length})`);
+          hasMore = data.data.length === 50;
+          page++;
+          // Delai entre pages pour eviter 429
+          if (hasMore) await new Promise(r => setTimeout(r, 600));
+        } else {
+          hasMore = false;
+        }
+      } catch (e) {
+        console.log(`[Fetch] Page ${page} error: ${e.message}, stopping`);
+        break;
       }
     }
 
