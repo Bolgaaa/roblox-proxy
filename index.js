@@ -5,11 +5,45 @@ const PORT    = process.env.PORT || 3000;
 
 app.use(express.json());
 
+// -----------------------------------------------
+// Cache : userId -> { data, timestamp }
+// -----------------------------------------------
 const cache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-// Fetch avec retry automatique si 429
-async function fetchWithRetry(url, options = {}, maxRetries = 6) {
+// -----------------------------------------------
+// Queue : une seule requête Roblox à la fois
+// Evite les 429 en cas de recherches simultanées
+// -----------------------------------------------
+let queueRunning = false;
+const queue = [];
+
+function processQueue() {
+  if (queueRunning || queue.length === 0) return;
+  queueRunning = true;
+  const { fn, resolve, reject } = queue.shift();
+  fn()
+    .then(resolve)
+    .catch(reject)
+    .finally(() => {
+      queueRunning = false;
+      // Petit délai entre chaque requête Roblox
+      setTimeout(processQueue, 500);
+    });
+}
+
+function enqueue(fn) {
+  return new Promise((resolve, reject) => {
+    queue.push({ fn, resolve, reject });
+    console.log(`[Queue] ${queue.length} task(s) waiting`);
+    processQueue();
+  });
+}
+
+// -----------------------------------------------
+// Fetch avec retry si 429
+// -----------------------------------------------
+async function fetchWithRetry(url, options = {}, maxRetries = 8) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const response = await fetch(url, {
       ...options,
@@ -23,20 +57,23 @@ async function fetchWithRetry(url, options = {}, maxRetries = 6) {
     if (response.ok) return response;
 
     if (response.status === 429 && attempt < maxRetries) {
-      const delay = attempt * 1000; // 1s, 2s, 3s...
-      console.log(`[Retry] 429 on attempt ${attempt}, waiting ${delay}ms...`);
+      const delay = attempt * 1500;
+      console.log(`[Retry] 429 attempt ${attempt}/${maxRetries}, waiting ${delay}ms...`);
       await new Promise(r => setTimeout(r, delay));
       continue;
     }
 
     throw new Error(`HTTP ${response.status}`);
   }
+  throw new Error("Max retries reached");
 }
 
+// -----------------------------------------------
+// Fetch outfits avec cache + queue
+// -----------------------------------------------
 async function getOutfits(userId) {
   const now = Date.now();
 
-  // Cache valide ?
   if (cache.has(userId)) {
     const entry = cache.get(userId);
     if (now - entry.timestamp < CACHE_TTL) {
@@ -45,17 +82,31 @@ async function getOutfits(userId) {
     }
   }
 
-  console.log(`[Fetch] userId ${userId}...`);
-  const url = `https://avatar.roblox.com/v1/users/${userId}/outfits?itemsPerPage=50&page=1`;
-  const response = await fetchWithRetry(url);
-  const data = await response.json();
+  // Passe par la queue pour eviter les requetes simultanees
+  return enqueue(async () => {
+    // Re-verifie le cache (une autre requete a peut-etre deja fetch entre temps)
+    if (cache.has(userId)) {
+      const entry = cache.get(userId);
+      if (Date.now() - entry.timestamp < CACHE_TTL) {
+        console.log(`[Cache] HIT (post-queue) for ${userId}`);
+        return entry.data;
+      }
+    }
 
-  cache.set(userId, { data, timestamp: now });
-  console.log(`[Cache] STORED ${data.data?.length || 0} outfits for ${userId}`);
-  return data;
+    console.log(`[Fetch] userId ${userId}...`);
+    const url = `https://avatar.roblox.com/v1/users/${userId}/outfits?itemsPerPage=50&page=1`;
+    const response = await fetchWithRetry(url);
+    const data = await response.json();
+
+    cache.set(userId, { data, timestamp: Date.now() });
+    console.log(`[Cache] STORED ${data.data?.length || 0} outfits for ${userId}`);
+    return data;
+  });
 }
 
-// GET /outfits/:userId
+// -----------------------------------------------
+// Routes
+// -----------------------------------------------
 app.get("/outfits/:userId", async (req, res) => {
   const { userId } = req.params;
   if (!userId || isNaN(userId)) {
@@ -70,7 +121,6 @@ app.get("/outfits/:userId", async (req, res) => {
   }
 });
 
-// GET /userid/:username
 app.get("/userid/:username", async (req, res) => {
   const { username } = req.params;
   try {
@@ -89,6 +139,11 @@ app.get("/userid/:username", async (req, res) => {
   }
 });
 
-app.get("/", (req, res) => res.json({ status: "ok", cache_size: cache.size }));
+app.get("/", (req, res) => res.json({
+  status: "ok",
+  cache_size: cache.size,
+  queue_length: queue.length,
+  queue_running: queueRunning,
+}));
 
 app.listen(PORT, () => console.log(`Proxy running on port ${PORT}`));
