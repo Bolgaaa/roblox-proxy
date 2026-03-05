@@ -94,13 +94,30 @@ async function getOutfits(userId) {
     }
 
     console.log(`[Fetch] userId ${userId}...`);
-    const url = `https://avatar.roblox.com/v1/users/${userId}/outfits?itemsPerPage=50&page=1`;
-    const response = await fetchWithRetry(url);
-    const data = await response.json();
 
-    cache.set(userId, { data, timestamp: Date.now() });
-    console.log(`[Cache] STORED ${data.data?.length || 0} outfits for ${userId}`);
-    return data;
+    // Pagine toutes les pages (max 100 outfits)
+    let allOutfits = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore && allOutfits.length < 100) {
+      const url = `https://avatar.roblox.com/v1/users/${userId}/outfits?itemsPerPage=50&page=${page}`;
+      const response = await fetchWithRetry(url);
+      const data = await response.json();
+      if (data.data && data.data.length > 0) {
+        allOutfits = allOutfits.concat(data.data);
+        console.log(`[Fetch] Page ${page}: ${data.data.length} outfits (total: ${allOutfits.length})`);
+        hasMore = data.data.length === 50;
+        page++;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    const merged = { data: allOutfits, total: allOutfits.length };
+    cache.set(userId, { data: merged, timestamp: Date.now() });
+    console.log(`[Cache] STORED ${allOutfits.length} total outfits for ${userId}`);
+    return merged;
   });
 }
 
