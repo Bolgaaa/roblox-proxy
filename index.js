@@ -99,11 +99,12 @@ async function getOutfits(userId) {
     const url1 = 'https://avatar.roblox.com/v1/users/' + userId + '/outfits?itemsPerPage=50&page=1';
     const res1 = await fetchWithRetry(url1);
     const data1 = await res1.json();
-    const page1 = (data1.data || []).filter(o => {
-      // Garde seulement les vrais outfits crees par le joueur
-      // outfitType "Avatar" = outfit normal, tout le reste = bundle/pack
-      return o.outfitType === "Avatar" || o.outfitType == null;
+    // Log les types pour debug
+    (data1.data || []).slice(0, 5).forEach(o => {
+      console.log(`[Debug] name="${o.name}" outfitType="${o.outfitType}" isEditable=${o.isEditable}`);
     });
+    // Filtre : garde isEditable = true uniquement
+    const page1 = (data1.data || []).filter(o => o.isEditable === true);
     console.log('[Fetch] Page 1: ' + page1.length + ' outfits');
 
     const hasPage2 = (data1.data || []).length === 50;
@@ -118,9 +119,7 @@ async function getOutfits(userId) {
           const url2 = 'https://avatar.roblox.com/v1/users/' + userId + '/outfits?itemsPerPage=50&page=2';
           const res2 = await fetchWithRetry(url2);
           const data2 = await res2.json();
-          const page2 = (data2.data || []).filter(o => {
-            return o.outfitType === "Avatar" || o.outfitType == null;
-          });
+          const page2 = (data2.data || []).filter(o => o.isEditable === true);
           const all = [...page1, ...page2];
           cache.set(userId, { data: { data: all, total: all.length, hasMore: false }, timestamp: Date.now() });
           console.log('[Cache] Page 2 done: ' + all.length + ' total for ' + userId);
