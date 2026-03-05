@@ -96,14 +96,9 @@ async function getOutfits(userId) {
     console.log('[Fetch] userId ' + userId + '...');
 
     // Page 1 : fetch immediat, retourne direct
-    const url1 = 'https://avatar.roblox.com/v1/users/' + userId + '/outfits?itemsPerPage=50&page=1';
+    const url1 = 'https://avatar.roblox.com/v1/users/' + userId + '/outfits?itemsPerPage=100&page=1';
     const res1 = await fetchWithRetry(url1);
     const data1 = await res1.json();
-    // Log les types pour debug
-    (data1.data || []).slice(0, 5).forEach(o => {
-      console.log(`[Debug] name="${o.name}" outfitType="${o.outfitType}" isEditable=${o.isEditable}`);
-    });
-    // Filtre : garde isEditable = true uniquement
     const page1 = (data1.data || []).filter(o => o.isEditable === true);
     console.log('[Fetch] Page 1: ' + page1.length + ' outfits');
 
