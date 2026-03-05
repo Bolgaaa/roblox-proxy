@@ -99,8 +99,12 @@ async function getOutfits(userId) {
     const url1 = 'https://avatar.roblox.com/v1/users/' + userId + '/outfits?itemsPerPage=50&page=1';
     const res1 = await fetchWithRetry(url1);
     const data1 = await res1.json();
-    const page1 = (data1.data || []).filter(o => o.isEditable !== false);
-    console.log('[Fetch] Page 1: ' + page1.length + ' outfits (skin packs filtres)');
+    const page1 = (data1.data || []).filter(o => {
+      // Garde seulement les vrais outfits crees par le joueur
+      // outfitType "Avatar" = outfit normal, tout le reste = bundle/pack
+      return o.outfitType === "Avatar" || o.outfitType == null;
+    });
+    console.log('[Fetch] Page 1: ' + page1.length + ' outfits');
 
     const hasPage2 = (data1.data || []).length === 50;
     const merged = { data: page1, total: page1.length, hasMore: hasPage2 };
@@ -114,7 +118,9 @@ async function getOutfits(userId) {
           const url2 = 'https://avatar.roblox.com/v1/users/' + userId + '/outfits?itemsPerPage=50&page=2';
           const res2 = await fetchWithRetry(url2);
           const data2 = await res2.json();
-          const page2 = (data2.data || []).filter(o => o.isEditable !== false);
+          const page2 = (data2.data || []).filter(o => {
+            return o.outfitType === "Avatar" || o.outfitType == null;
+          });
           const all = [...page1, ...page2];
           cache.set(userId, { data: { data: all, total: all.length, hasMore: false }, timestamp: Date.now() });
           console.log('[Cache] Page 2 done: ' + all.length + ' total for ' + userId);
